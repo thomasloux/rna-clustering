@@ -5,268 +5,31 @@ import torch
 import numpy as np
 import networkx as nx
 import pandas as pd
-from typing import Sequence, Optional
+import os.path as osp
+from typing import Sequence, Optional, Tuple
 
 import torch_geometric
 from torch_geometric.nn.models.autoencoder import GAE
 from torch_geometric import nn
 from torch_geometric.transforms import RandomLinkSplit
-from torch_geometric.utils.convert import from_networkx
-from torch_geometric.data import Data, DataLoader, InMemoryDataset
+from torch_geometric.data import Data, InMemoryDataset, Dataset
+from torch_geometric.loader import DataLoader
 from torch.nn import functional as F
 import subprocess
+from tqdm import tqdm
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+sns.set_theme(style="darkgrid")
 
 from time import time
 
-class One_RNA_InMemoryDataset(InMemoryDataset):
-    """
-    Dataset for one RNA sequence.
-
-    Take one RNA sequence and generate a certain number of suboptimal structures. Transform each structure into a graph.
-    Raw data : RNA sequence (only the sequence in the first line of the file)
-    :param
-    """
-    nucleotides_correspondance = {
-        'A': 0,
-        'C': 1,
-        'G': 2,
-        'U': 3,
-        'T': 3
-    }
-
-
-    def __init__(self, root: str, transform=None, pre_transform=None, pre_filter=None):
-        """
-        :param root: root directory where the dataset should be saved.
-            This folder is split into raw_dir (downloaded dataset) and processed_dir (processed dataset).
-        :param n: number of suboptimal structures to generate
-        """
-        super(One_RNA_Dataset, self).__init__(root, transform, pre_transform, pre_filter)
-        print(f"Root : {root}")
-        self.data, self.slices = torch.load(self.processed_paths[0])
-
-    @property
-    def raw_file_names(self):
-        return ['test.seq']
-
-    @property
-    def processed_file_names(self):
-        return ['data.pt']
-
-    def download(self):
-        raise NotImplementedError('Raw data not found.')
-
-    def structure_to_data(self, structure: str, sequence: str, weight: Optional[float] = 1.0) -> Data:
-        """
-        Convert a RNA structure to a graph of type torch_geometric.data.Data.
-        """
-        ## Node features (shape : num_nodes x num_node_features)
-        # One-hot encoding of the nucleotide
-        x = torch.Tensor([self.nucleotides_correspondance[sequence[i]] for i in range(len(sequence))]).long()
-        x = F.one_hot(x, 4).float()
-
-        ## Edge index (shape : 2 x num_edges)
-        # Edge index is a tensor of size 2 x num_edges where each column represents an edge.
-        edge_index_strong = torch.tensor([range(len(sequence) - 1), range(1, len(sequence))], dtype=torch.long)
-        edge_pairs = []
-        stack = []
-
-        for i, c in enumerate(structure):
-            if c == '(':
-                stack.append(i)
-            elif c == ')':
-                j = stack.pop()
-                edge_pairs.extend([(i, j)])
-
-        # Convert the list of edge pairs to a tensor
-        edge_index_weak = torch.tensor(edge_pairs, dtype=torch.long).t()
-        edge_pairs = torch.cat(
-            [
-                edge_index_strong,
-                edge_index_strong.flip(0),
-                edge_index_weak,
-                edge_index_weak.flip(0)
-            ],
-            dim=1
-        )
-         
-        data = Data(x=x, edge_index=edge_pairs)
-
-        return data
-
-
-
-    def generate_suboptimal_structures(self, input_file: str, n: int) -> list[str]:
-        """
-        Using ViennaRNA package to generate suboptimal structures.
-        Note : we use CLI command because it offers more options than the python wrapper
-        :param sequence: RNA sequence
-        :param n: number of suboptimal structures to generate
-        :return: list of suboptimal structures
-        """
-        with open(input_file, 'r') as f:
-            sequence = f.readline().strip()
-            assert set(sequence) <= set('ACGUT'), "Invalid sequence" 
-        # --stochBT : stochastic backtracking
-        # Return only the dot-bracket structure
-        # --stochBT_en 
-        # Return dot-bracket structure, energy and probability
-        command = subprocess.run(["RNAsubopt", "--stochBT=" + str(n), "-i", input_file], capture_output=True)
-        output = command.stdout.decode('utf-8').split('\n')
-        # Remove first line (sequence) and last line (empty)
-        output = output[1:-1]
-        return output
-
-    def process(self):
-        # Read data into huge `Data` list.
-        with open(self.raw_paths[0], 'r') as f:
-            sequence = f.readline().strip()
-
-        structures = self.generate_suboptimal_structures(self.raw_paths[0], n=10)
-        data_list = [self.structure_to_data(structure, sequence) for structure in structures]
-        print(f"Number of structures : {len(data_list)}")
-
-        if self.pre_filter is not None:
-            data_list = [d for d in data_list if self.pre_filter(d)]
-
-        if self.pre_transform is not None:
-            data_list = [self.pre_transform(d) for d in data_list]
-
-        data, slices = self.collate(data_list)
-
-        torch.save((data, slices), self.processed_paths[0])
-
-    def len(self):
-        return len(self.data)
-
-class One_RNA_Dataset(Dataset):
-    """
-    Dataset for one RNA sequence.
-
-    Take one RNA sequence and generate a certain number of suboptimal structures. Transform each structure into a graph.
-    Raw data : RNA sequence (only the sequence in the first line of the file)
-    :param
-    """
-    nucleotides_correspondance = {
-        'A': 0,
-        'C': 1,
-        'G': 2,
-        'U': 3,
-        'T': 3
-    }
-
-
-    def __init__(self, root: str, transform=None, pre_transform=None, pre_filter=None):
-        """
-        :param root: root directory where the dataset should be saved.
-            This folder is split into raw_dir (downloaded dataset) and processed_dir (processed dataset).
-        :param n: number of suboptimal structures to generate
-        """
-        super(One_RNA_Dataset, self).__init__(root, transform, pre_transform, pre_filter)
-        print(f"Root : {root}")
-        self.data, self.slices = torch.load(self.processed_paths[0])
-
-    @property
-    def raw_file_names(self):
-        return ['test.seq']
-
-    @property
-    def processed_file_names(self):
-        return ['data.pt']
-
-    def download(self):
-        raise NotImplementedError('Raw data not found.')
-
-    def structure_to_data(self, structure: str, sequence: str, weight: Optional[float] = 1.0) -> Data:
-        """
-        Convert a RNA structure to a graph of type torch_geometric.data.Data.
-        """
-        ## Node features (shape : num_nodes x num_node_features)
-        # One-hot encoding of the nucleotide
-        x = torch.Tensor([self.nucleotides_correspondance[sequence[i]] for i in range(len(sequence))]).long()
-        x = F.one_hot(x, 4).float()
-
-        ## Edge index (shape : 2 x num_edges)
-        # Edge index is a tensor of size 2 x num_edges where each column represents an edge.
-        edge_index_strong = torch.tensor([range(len(sequence) - 1), range(1, len(sequence))], dtype=torch.long)
-        edge_pairs = []
-        stack = []
-
-        for i, c in enumerate(structure):
-            if c == '(':
-                stack.append(i)
-            elif c == ')':
-                j = stack.pop()
-                edge_pairs.extend([(i, j)])
-
-        # Convert the list of edge pairs to a tensor
-        edge_index_weak = torch.tensor(edge_pairs, dtype=torch.long).t()
-        edge_pairs = torch.cat(
-            [
-                edge_index_strong,
-                edge_index_strong.flip(0),
-                edge_index_weak,
-                edge_index_weak.flip(0)
-            ],
-            dim=1
-        )
-         
-        data = Data(x=x, edge_index=edge_pairs)
-
-        return data
-
-
-
-    def generate_suboptimal_structures(self, input_file: str, n: int) -> list[str]:
-        """
-        Using ViennaRNA package to generate suboptimal structures.
-        Note : we use CLI command because it offers more options than the python wrapper
-        :param sequence: RNA sequence
-        :param n: number of suboptimal structures to generate
-        :return: list of suboptimal structures
-        """
-        with open(input_file, 'r') as f:
-            sequence = f.readline().strip()
-            assert set(sequence) <= set('ACGUT'), "Invalid sequence" 
-        # --stochBT : stochastic backtracking
-        # Return only the dot-bracket structure
-        # --stochBT_en 
-        # Return dot-bracket structure, energy and probability
-        command = subprocess.run(["RNAsubopt", "--stochBT=" + str(n), "-i", input_file], capture_output=True)
-        output = command.stdout.decode('utf-8').split('\n')
-        # Remove first line (sequence) and last line (empty)
-        output = output[1:-1]
-        return output
-
-    def process(self):
-        # Read data into huge `Data` list.
-        with open(self.raw_paths[0], 'r') as f:
-            sequence = f.readline().strip()
-
-        structures = self.generate_suboptimal_structures(self.raw_paths[0], n=10)
-        data_list = [self.structure_to_data(structure, sequence) for structure in structures]
-        print(f"Number of structures : {len(data_list)}")
-
-        if self.pre_filter is not None:
-            data_list = [d for d in data_list if self.pre_filter(d)]
-
-        if self.pre_transform is not None:
-            data_list = [self.pre_transform(d) for d in data_list]
-
-        data, slices = self.collate(data_list)
-
-        torch.save((data, slices), self.processed_paths[0])
-
-    def len(self):
-        return len(self.data)
-
-
 
 class Encoder(torch.nn.Module):
-    def __init__(self, in_channels: int, hidden_channels: int) -> None:
+    def __init__(self, in_channels: int, hidden_channels: int, number_channel: int) -> None:
         super(Encoder, self).__init__()
-        self.conv1 = torch_geometric.nn.GCNConv(in_channels, hidden_channels)
-        self.conv2 = torch_geometric.nn.GCNConv(hidden_channels, hidden_channels)
+        self.conv1 = nn.GCNConv(in_channels, hidden_channels)
+        self.conv2 = nn.GCNConv(hidden_channels, number_channel)
 
     def forward(
         self, x: torch.Tensor, edge_index: torch.Tensor
@@ -274,6 +37,7 @@ class Encoder(torch.nn.Module):
         x = self.conv1(x, edge_index).relu()
         x = self.conv2(x, edge_index).relu()
         return x
+
 
 def get_device() -> torch.device:
     """
@@ -292,48 +56,163 @@ def get_device() -> torch.device:
         device = torch.device('cpu')
     return device
 
-def get_trained_model(epoch):
-    # Parameters
-    hidden_dim = 32
+
+def get_vanilla_model(hidden_channels) -> GAE:
+    """
+    Get vanilla GAE model
+    """
+    model = GAE(
+        Encoder(in_channels=4, hidden_channels=hidden_channels, number_channel=hidden_channels),
+    )
+    return model
+
+def base_pair_distance(structure1: Data, structure2: Data) -> float:
+    """
+    Compute the base pair distance between two RNA structures
+    it corresponds to the symetric difference between the two sets of base pairs
+
+    :param structure1: first RNA structure
+    :param structure2: second RNA structure
+    :return: base pair distance
+    """
+    edges1 = set(structure1.edge_index.t())
+    edges2 = set(structure2.edge_index.t())
+    return float(len(edges1.symmetric_difference(edges2)))
+
+def get_couples(data: One_RNA_Dataset, n: int) -> list[tuple[Data, Data]]:
+    """
+    Generate n couples of graphs from a dataset
+    """
+    rng = np.random.default_rng()
+    random_index = rng.integers(0, len(data), size=(n, 2))
+    return [(data[i], data[j]) for i, j in random_index]
+
+def graph_embedding_from_node_embedding(node_embedding: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the graph embedding from the node embedding
+    """
+    return torch.mean(node_embedding, dim=0)
+
+def get_trained_model(epoch: int, model: GAE) -> GAE:
+    """
+    Return a trained model
+
+    :param epoch: number of epochs for training
+    :param model: model to train
+    :return: trained model
+    """
 
     # Load data
     data = One_RNA_Dataset(root='data/test')
     data_batch = DataLoader(data, batch_size=128, shuffle=True)
 
-    # Model
-    input_dim = 4
-    encoder = Encoder(input_dim, hidden_dim)
-    model = GAE(encoder)
+    # Optimizer
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
+    # Training
+    def train(graph):
+        model.train()
+        optimizer.zero_grad()
+        # Compute reconstuction loss for graph
+        z = model.encode(graph.x, graph.edge_index)
+        loss = model.recon_loss(z, graph.edge_index)
+        loss.backward()
+        optimizer.step()
+        return loss
+
+    for e in tqdm(range(epoch)):
+        for batch in data_batch:
+            train(batch)
+        # if e % (epoch//10) == 0:
+        #      print(f"Epoch: {e:03d}, Loss: {loss:.4f}")
+    return model
+
+def get_couple_trained_model(epoch: int, model: GAE, distance, alpha: float = 1) -> Tuple[GAE, list[float]]:
+    """
+    Return a trained model
+
+    :param epoch: number of epochs for training
+    :param model: model to train
+    :param distance: distance function to use in the loss
+    :param alpha: weight of the distance loss
+    :return: trained model
+    """
+
+    # Load data
+    data = One_RNA_Dataset(root='data/test')
+    data_batch = get_couples(data, n=100)
 
     # Optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
     # Training
     def train(data):
+        graph1, graph2 = data
         model.train()
         optimizer.zero_grad()
-        z = model.encode(data.x, data.edge_index)
-        loss = model.recon_loss(z, data.edge_index)
+
+        # Compute reconstuction loss for graph1
+        z1 = model.encode(graph1.x, graph1.edge_index)
+        loss1 = model.recon_loss(z1, graph1.edge_index)
+
+        # Compute reconstuction loss for graph2
+        z2 = model.encode(graph2.x, graph2.edge_index)
+        loss2 = model.recon_loss(z2, graph2.edge_index)
+
+        # Compute loss distance and scalar product between embeddings
+        graph1_embedding = graph_embedding_from_node_embedding(z1)
+        graph2_embedding = graph_embedding_from_node_embedding(z2)
+        scalar_distance = torch.dot(graph1_embedding, graph2_embedding)
+        distance_loss = (scalar_distance - torch.tensor(distance(graph1, graph2)))**2
+
+        # Total loss
+        loss = loss1 + loss2 + alpha * distance_loss
         loss.backward()
         optimizer.step()
         return loss
 
-    def test(data):
-        model.eval()
-        with torch.no_grad():
-            z = model.encode(data.x, data.edge_index)
-        return float(model.recon_loss(z, data.edge_index))
-
-    for e in range(epoch):
-        deb = time()
+    loss_record = []
+    for e in tqdm(range(epoch)):
         loss = 0
         for batch in data_batch:
             loss += train(batch)
-        if e % (epoch//10) == 0:
-            print(f"Epoch: {e:03d}, Loss: {loss:.4f}, Time: {time() - deb:.4f}s")
-    #print("Test provide " + str(test(graph)))
-    return model
+        loss_record.append(float(loss.detach()))
+        # if e % (epoch//10) == 0:
+        #      print(f"Epoch: {e:03d}, Loss: {loss:.4f}")
+    return model, loss_record
+
+
+def test_model(model, dataset):
+    """
+    Compute total loss on a dataset
+    It only takes into account the positive examples (edges that are present in the graph)
+    """
+    model.eval()
+    data_loader = DataLoader(dataset, batch_size=128)
+    loss = 0
+    with torch.no_grad():
+        for batch in data_loader:
+            z = model.encode(batch.x, batch.edge_index)
+            # provide negative samples from the graph
+            negative_edge_index = torch_geometric.utils.negative_sampling(
+                edge_index=batch.edge_index, num_nodes=batch.num_nodes,
+                num_neg_samples=batch.edge_index.size(1))
+            loss += model.recon_loss(z, batch.edge_index, negative_edge_index)
+    return loss/len(dataset)
+
+def plot_loss(loss_record: Sequence[float]) -> None:
+    """
+    Plot the loss during training
+    """
+    plt.plot(loss_record[1:])
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.yscale('log')
+    plt.title('Loss during training')
+    plt.savefig('loss.png')
 
 if __name__ == "__main__":
-    dataset = One_RNA_Dataset(root='data/test')
+    model = get_vanilla_model(hidden_channels=32)
+    model, loss = get_couple_trained_model(epoch=1, model=model, distance=base_pair_distance)
+    print(test_model(model, One_RNA_Dataset(root='data/test')))
+
