@@ -24,6 +24,8 @@ sns.set_theme(style="darkgrid")
 
 from time import time
 
+from .data import One_RNA_Dataset
+
 
 class Encoder(torch.nn.Module):
     def __init__(self, in_channels: int, hidden_channels: int, number_channel: int) -> None:
@@ -90,6 +92,8 @@ def get_couples(data: One_RNA_Dataset, n: int) -> list[tuple[Data, Data]]:
 def graph_embedding_from_node_embedding(node_embedding: torch.Tensor) -> torch.Tensor:
     """
     Compute the graph embedding from the node embedding
+
+    Could be replace by more sophisticated methods (other pooling methods, attention, etc.)
     """
     return torch.mean(node_embedding, dim=0)
 

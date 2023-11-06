@@ -5,7 +5,10 @@
 
 import torch
 import re
-import torch_geometric.data import Data, Dataset
+from torch_geometric.data import Data, Dataset
+import random
+import subprocess
+import os.path as osp
 
 class One_RNA_Dataset(Dataset):
     """
@@ -31,8 +34,6 @@ class One_RNA_Dataset(Dataset):
         :param n: number of suboptimal structures to generate
         """
         super(One_RNA_Dataset, self).__init__(root, transform, pre_transform, pre_filter)
-        print(f"Root : {root}")
-        self.data, self.slices = torch.load(self.processed_paths[0])
 
     @property
     def raw_file_names(self):
@@ -40,7 +41,7 @@ class One_RNA_Dataset(Dataset):
 
     @property
     def processed_file_names(self):
-        return ['data.pt']
+        return [f'data_{i}.pt' for i in range(self.n)]
 
     def download(self):
         raise NotImplementedError('Raw data not found.')
@@ -120,12 +121,15 @@ class One_RNA_Dataset(Dataset):
         if self.pre_transform is not None:
             data_list = [self.pre_transform(d) for d in data_list]
 
-        data, slices = self.collate(data_list)
-
-        torch.save((data, slices), self.processed_paths[0])
+        for i, data in enumerate(data_list):
+            torch.save(data), osp.join(self.processed_dir, f'data_{i}.pt')
 
     def len(self):
-        return len(self.data)
+        return len(self.processed_file_names)
+
+    def get(self, idx):
+        data = torch.load(osp.join(self.processed_dir, f'data_{idx}.pt'))
+        return data
 
 class PairData(Data):
     """
