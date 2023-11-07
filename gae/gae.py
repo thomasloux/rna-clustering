@@ -6,7 +6,7 @@ import numpy as np
 import networkx as nx
 import pandas as pd
 import os.path as osp
-from typing import Sequence, Optional, Tuple
+from typing import Sequence, Optional, Tuple, Union
 
 import torch_geometric
 from torch_geometric.nn.models.autoencoder import GAE
@@ -15,6 +15,7 @@ from torch_geometric.transforms import RandomLinkSplit
 from torch_geometric.data import Data, InMemoryDataset, Dataset
 from torch_geometric.loader import DataLoader
 from torch.nn import functional as F
+from torch import Tensor
 import subprocess
 from tqdm import tqdm
 
@@ -24,7 +25,7 @@ sns.set_theme(style="darkgrid")
 
 from time import time
 
-from .data import One_RNA_Dataset
+from .data import One_RNA_Dataset, PairDataset
 
 
 class Encoder(torch.nn.Module):
@@ -68,19 +69,28 @@ def get_vanilla_model(hidden_channels) -> GAE:
     )
     return model
 
-def base_pair_distance(structure1: Data, structure2: Data) -> float:
+
+def base_pair_distance(structure_1: Tensor, structure_2: Tensor,
+        batch_1: Optional[Tensor] = None, batch_2: Optional[Tensor] = None) -> Union[float, Tensor]:
     """
     Compute the base pair distance between two RNA structures
     it corresponds to the symetric difference between the two sets of base pairs
 
     :param structure1: first RNA structure
     :param structure2: second RNA structure
+    :param batch_1: batch index for graph 1, format [sum(num_nodes) in the batch] like [0, 0, 0, 1, 1, 1, 1, 2, 2, 2]
+    :param batch_2: batch index for graph 2
     :return: base pair distance
     """
-    edges1 = set(structure1.edge_index.t())
-    edges2 = set(structure2.edge_index.t())
-    return float(len(edges1.symmetric_difference(edges2)))
+    if batch_1 is not None and batch_2 is not None:
+        # Compute the base pair distance for each graph in the batch
+        return torch.tensor([base_pair_distance(structure_1[batch_1 == i], structure_2[batch_2 == i]) for i in range(batch_1[-1] + 1)])
+    else:
+        edges1 = set(structure_1.t())
+        edges2 = set(structure_2.t())
+        return float(len(edges1.symmetric_difference(edges2)))
 
+#Deprecated
 def get_couples(data: One_RNA_Dataset, n: int) -> list[tuple[Data, Data]]:
     """
     Generate n couples of graphs from a dataset
@@ -89,13 +99,6 @@ def get_couples(data: One_RNA_Dataset, n: int) -> list[tuple[Data, Data]]:
     random_index = rng.integers(0, len(data), size=(n, 2))
     return [(data[i], data[j]) for i, j in random_index]
 
-def graph_embedding_from_node_embedding(node_embedding: torch.Tensor) -> torch.Tensor:
-    """
-    Compute the graph embedding from the node embedding
-
-    Could be replace by more sophisticated methods (other pooling methods, attention, etc.)
-    """
-    return torch.mean(node_embedding, dim=0)
 
 def get_trained_model(epoch: int, model: GAE) -> GAE:
     """
@@ -144,33 +147,45 @@ def get_couple_trained_model(epoch: int, model: GAE, distance, alpha: float = 1)
 
     # Load data
     data = One_RNA_Dataset(root='data/test')
-    data_batch = get_couples(data, n=100)
-
+    data = PairDataset(data, data, sample=True)
+    data_batch = DataLoader(data, batch_size=2, shuffle=False, follow_batch=["x_1", "x_2"])
+    #### ADD TRANSFORM HERE ###
+    
     # Optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
     # Training
-    def train(data):
-        graph1, graph2 = data
+    def train(data_batch):
+        """
+        Train the model on a batch of data
+
+        data_batch contains :
+        - x_1: node features for graph 1, format [sum(num_nodes) in the batch, num_features for graph_1]
+        - edge_index_1: edge index for graph 1, format [2, sum(num_edges) in the batch for graph_1]
+        - x_2: node features for graph 2
+        - edge_index_2: edge index for graph 2
+        - x_1_batch: batch index for graph 1, format [sum(num_nodes) in the batch]
+        - x_2_batch: batch index for graph 2
+        """
         model.train()
         optimizer.zero_grad()
 
         # Compute reconstuction loss for graph1
-        z1 = model.encode(graph1.x, graph1.edge_index)
-        loss1 = model.recon_loss(z1, graph1.edge_index)
+        z1 = model.encode(data_batch.x_1, data_batch.edge_index_1)
+        loss1 = model.recon_loss(z1, data_batch.edge_index_1)
 
         # Compute reconstuction loss for graph2
-        z2 = model.encode(graph2.x, graph2.edge_index)
-        loss2 = model.recon_loss(z2, graph2.edge_index)
+        z2 = model.encode(data_batch.x_2, data_batch.edge_index_2)
+        loss2 = model.recon_loss(z2, data_batch.edge_index_2)
 
         # Compute loss distance and scalar product between embeddings
-        graph1_embedding = graph_embedding_from_node_embedding(z1)
-        graph2_embedding = graph_embedding_from_node_embedding(z2)
-        scalar_distance = torch.dot(graph1_embedding, graph2_embedding)
-        distance_loss = (scalar_distance - torch.tensor(distance(graph1, graph2)))**2
+        graph1_embedding = torch_geometric.nn.pool.global_mean_pool(z1, data_batch.x_1_batch)
+        graph2_embedding = torch_geometric.nn.pool.global_mean_pool(z2, data_batch.x_2_batch)
+        scalar_distance = (graph1_embedding * graph2_embedding).sum(axis=1)  # Scalar product between embeddings
+        distance_loss = (scalar_distance - torch.tensor(distance(data_batch.edge_index_1, data_batch.edge_index_2)))**2
 
         # Total loss
-        loss = loss1 + loss2 + alpha * distance_loss
+        loss = (loss1 + loss2 + alpha * distance_loss).sum()
         loss.backward()
         optimizer.step()
         return loss
@@ -186,7 +201,7 @@ def get_couple_trained_model(epoch: int, model: GAE, distance, alpha: float = 1)
     return model, loss_record
 
 
-def test_model(model, dataset):
+def test_model_reconstruction(model, dataset):
     """
     Compute total loss on a dataset
     It only takes into account the positive examples (edges that are present in the graph)
@@ -203,6 +218,25 @@ def test_model(model, dataset):
                 num_neg_samples=batch.edge_index.size(1))
             loss += model.recon_loss(z, batch.edge_index, negative_edge_index)
     return loss/len(dataset)
+
+def test_model_distance(model, dataset, distance):
+    """
+    Compute total loss on a dataset
+    for the distance and scalar product between embeddings
+    """
+    model.eval()
+    data_loader = DataLoader(dataset, batch_size=128, follow_batch=["x_1", "x_2"])
+    loss = 0
+    with torch.no_grad():
+        for batch in data_loader:
+            z1 = model.encode(batch.x_1, batch.edge_index_1)
+            z2 = model.encode(batch.x_2, batch.edge_index_2)
+            graph1_embedding = torch_geometric.nn.pool.global_mean_pool(z1, batch.x_1_batch)
+            graph2_embedding = torch_geometric.nn.pool.global_mean_pool(z2, batch.x_2_batch)
+            scalar_distance = (graph1_embedding * graph2_embedding).sum(axis=1)
+            loss += (scalar_distance - torch.tensor(distance(batch.edge_index_1, batch.edge_index_2)))**2
+    return loss/len(dataset)
+
 
 def plot_loss(loss_record: Sequence[float]) -> None:
     """

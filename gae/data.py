@@ -9,6 +9,7 @@ from torch_geometric.data import Data, Dataset
 import random
 import subprocess
 import os.path as osp
+import torch.nn.functional as F
 
 class One_RNA_Dataset(Dataset):
     """
@@ -25,7 +26,7 @@ class One_RNA_Dataset(Dataset):
         'U': 3,
         'T': 3
     }
-    n = 100
+    n = 1000
 
     def __init__(self, root: str, transform=None, pre_transform=None, pre_filter=None):
         """
@@ -111,7 +112,7 @@ class One_RNA_Dataset(Dataset):
         with open(self.raw_paths[0], 'r') as f:
             sequence = f.readline().strip()
 
-        structures = self.generate_suboptimal_structures(self.raw_paths[0], n=10)
+        structures = self.generate_suboptimal_structures(self.raw_paths[0], n=self.n)
         data_list = [self.structure_to_data(structure, sequence) for structure in structures]
         print(f"Number of structures : {len(data_list)}")
 
@@ -122,7 +123,7 @@ class One_RNA_Dataset(Dataset):
             data_list = [self.pre_transform(d) for d in data_list]
 
         for i, data in enumerate(data_list):
-            torch.save(data), osp.join(self.processed_dir, f'data_{i}.pt')
+            torch.save(data, osp.join(self.processed_dir, f'data_{i}.pt'))
 
     def len(self):
         return len(self.processed_file_names)
@@ -135,6 +136,14 @@ class PairData(Data):
     """
     Class to handle a pair of graphs
     """
+    def __init__(self, x_1=None, edge_index_1=None, edge_attr_1=None, x_2=None, edge_index_2=None, edge_attr_2=None, **kwargs):
+        """
+        Enforce the necessary arguments to be PairData objects
+        """
+        super(PairData, self).__init__(
+            x_1=x_1, edge_index_1=edge_index_1, edge_attr_1=edge_attr_1, x_2=x_2, edge_index_2=edge_index_2, edge_attr_2=edge_attr_2, **kwargs
+            )
+        
     def __inc__(self, key, value, *args):
         if bool(re.search('index_1', key)):
             return self.x_1.size(0)
