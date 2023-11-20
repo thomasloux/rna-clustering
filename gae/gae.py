@@ -5,6 +5,7 @@ import torch
 import numpy as np
 import networkx as nx
 import pandas as pd
+import os
 import os.path as osp
 from typing import Sequence, Optional, Tuple, Union
 
@@ -24,8 +25,8 @@ import seaborn as sns
 sns.set_theme(style="darkgrid")
 
 from time import time
-
-from .data import One_RNA_Dataset, PairDataset
+print(os.getcwd())
+from data import One_RNA_Dataset, PairDataset
 
 
 class Encoder(torch.nn.Module):
@@ -84,7 +85,15 @@ def base_pair_distance(structure_1: Tensor, structure_2: Tensor,
     """
     if batch_1 is not None and batch_2 is not None:
         # Compute the base pair distance for each graph in the batch
-        return torch.tensor([base_pair_distance(structure_1[batch_1 == i], structure_2[batch_2 == i]) for i in range(batch_1[-1] + 1)])
+        liste = []
+        for i in range(batch_1[-1] + 1):
+            node_range_1 = batch_1[batch_1 == i]
+            edges_1 = structure_1[:, torch.isin(structure_1[0, :], node_range_1)]
+            node_range_2 = batch_2[batch_2 == i]
+            edges_2 = structure_2[:, torch.isin(structure_2[0, :], node_range_2)]
+            liste.append(base_pair_distance(edges_1, edges_2))
+        return torch.tensor(liste)
+        #return torch.tensor([base_pair_distance(structure_1[batch_1 == i], structure_2[batch_2 == i]) for i in range(batch_1[-1] + 1)])
     else:
         edges1 = set(structure_1.t())
         edges2 = set(structure_2.t())
@@ -148,8 +157,10 @@ def get_couple_trained_model(epoch: int, model: GAE, distance, alpha: float = 1)
     # Load data
     data = One_RNA_Dataset(root='data/test')
     data = PairDataset(data, data, sample=True)
-    data_batch = DataLoader(data, batch_size=2, shuffle=False, follow_batch=["x_1", "x_2"])
+    data_batch = DataLoader(data, batch_size=16, shuffle=False, follow_batch=["x_1", "x_2"])
+    print(len(data))
     #### ADD TRANSFORM HERE ###
+    # Normalize for the distance, maybe 2*size of the sequence
     
     # Optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
@@ -181,24 +192,51 @@ def get_couple_trained_model(epoch: int, model: GAE, distance, alpha: float = 1)
         # Compute loss distance and scalar product between embeddings
         graph1_embedding = torch_geometric.nn.pool.global_mean_pool(z1, data_batch.x_1_batch)
         graph2_embedding = torch_geometric.nn.pool.global_mean_pool(z2, data_batch.x_2_batch)
-        scalar_distance = (graph1_embedding * graph2_embedding).sum(axis=1)  # Scalar product between embeddings
-        distance_loss = (scalar_distance - torch.tensor(distance(data_batch.edge_index_1, data_batch.edge_index_2)))**2
+        scalar_product = (graph1_embedding * graph2_embedding).sum(axis=1)  # Scalar product between embeddings
+        # euclidean_distance = torch.norm(graph1_embedding - graph2_embedding, dim=1)  # Euclidean distance between embeddings
+        # print("Euclidean distance", euclidean_distance.mean())
+        # print("Scalar product", scalar_product.mean())
+        distances = distance(
+            data_batch.edge_index_1,
+            data_batch.edge_index_2,
+            batch_1=data_batch.x_1_batch,
+            batch_2=data_batch.x_2_batch
+        )
+        # print("Distance", distances.mean())
+        distance_loss = (scalar_product - torch.tensor(distances))**2
 
         # Total loss
-        loss = (loss1 + loss2 + alpha * distance_loss).sum()
+        loss = loss1 + loss2 + alpha * distance_loss.mean()
+        #print("Loss recontuction ", loss1 + loss2, "Distance loss", (alpha * distance_loss.mean()))
         loss.backward()
         optimizer.step()
-        return loss
 
-    loss_record = []
+        nb_graphs = data_batch.x_1_batch[-1] + 1
+        return loss * nb_graphs, (loss1 + loss2) * nb_graphs, alpha * distance_loss.sum()
+
+    total_loss_record = []
+    total_loss_reconstruction_record = []
+    total_loss_distance_record = []
     for e in tqdm(range(epoch)):
         loss = 0
+        loss_reconstruction = 0
+        loss_distance = 0
         for batch in data_batch:
-            loss += train(batch)
-        loss_record.append(float(loss.detach()))
+            loss_batch, loss_reconstruction_batch, loss_distance_batch = train(batch)
+            loss += loss_batch
+            loss_reconstruction += loss_reconstruction_batch
+            loss_distance += loss_distance_batch
+        total_loss_record.append(float(loss.detach()))
+        total_loss_reconstruction_record.append(float(loss_reconstruction.detach()))
+        total_loss_distance_record.append(float(loss_distance.detach()))
+    
+    nb_graphs = len(data)
+    print("Total loss", total_loss_record[-1]/nb_graphs)
+    print("Reconstruction loss", total_loss_reconstruction_record[-1]/nb_graphs)
+    print("Distance loss", total_loss_distance_record[-1]/nb_graphs)
         # if e % (epoch//10) == 0:
         #      print(f"Epoch: {e:03d}, Loss: {loss:.4f}")
-    return model, loss_record
+    return model, [total_loss_record, total_loss_reconstruction_record, total_loss_distance_record]
 
 
 def test_model_reconstruction(model, dataset):
@@ -249,8 +287,8 @@ def plot_loss(loss_record: Sequence[float]) -> None:
     plt.title('Loss during training')
     plt.savefig('loss.png')
 
-if __name__ == "__main__":
-    model = get_vanilla_model(hidden_channels=32)
-    model, loss = get_couple_trained_model(epoch=1, model=model, distance=base_pair_distance)
-    print(test_model(model, One_RNA_Dataset(root='data/test')))
+# if __name__ == "__main__":
+#     model = get_vanilla_model(hidden_channels=32)
+#     model, loss = get_couple_trained_model(epoch=1, model=model, distance=base_pair_distance)
+#     print(test_model(model, One_RNA_Dataset(root='data/test')))
 
