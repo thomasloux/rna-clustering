@@ -1,0 +1,7 @@
+data/
+gae/models/
+gae/figures
+gae/__pycache__/
+*.ipynb
+*.jar
+.DS_Store
