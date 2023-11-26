@@ -1,111 +1,74 @@
 import numpy as np
-import scipy.sparse as sp
-from sklearn.metrics import roc_auc_score, average_precision_score
+import torch
+from torch import Tensor
+from typing import Optional, Union
 
 
-def sparse_to_tuple(sparse_mx):
-    if not sp.isspmatrix_coo(sparse_mx):
-        sparse_mx = sparse_mx.tocoo()
-    coords = np.vstack((sparse_mx.row, sparse_mx.col)).transpose()
-    values = sparse_mx.data
-    shape = sparse_mx.shape
-    return coords, values, shape
+def base_pair_distance(structure_1: Tensor, structure_2: Tensor,
+        batch_1: Optional[Tensor] = None, batch_2: Optional[Tensor] = None) -> Union[float, Tensor]:
+    """
+    Compute the base pair distance between two RNA structures
+    it corresponds to the symetric difference between the two sets of base pairs
 
+    :param structure1: first RNA structure
+    :param structure2: second RNA structure
+    :param batch_1: batch index for graph 1, format [sum(num_nodes) in the batch] like [0, 0, 0, 1, 1, 1, 1, 2, 2, 2]
+    :param batch_2: batch index for graph 2
+    :return: base pair distance
+    """
+    if batch_1 is not None and batch_2 is not None:
+        # Compute the base pair distance for each graph in the batch
+        liste = []
+        for i in range(batch_1[-1] + 1):
+            node_range_1 = torch.argwhere(batch_1 == i).flatten()
+            edges_1 = structure_1[:, torch.isin(structure_1[0, :], node_range_1)]
+            node_range_2 = torch.argwhere(batch_2 == i).flatten()
+            edges_2 = structure_2[:, torch.isin(structure_2[0, :], node_range_2)]
+            liste.append(base_pair_distance(edges_1, edges_2))
+        return torch.tensor(liste)
+    else:
+        edges1 = set(map(tuple, structure_1.t().detach().numpy()))
+        edges2 = set(map(tuple, structure_2.t().detach().numpy()))
+        # Divide by 2 because the symetric difference counts each edge twice
+        distance = float(len(edges1.symmetric_difference(edges2)))/2
+        return distance
 
-def mask_test_edges(adj):
-    # Function to build test set with 10% positive links
-    # This function is taken from the official repository: https://github.com/tkipf/gae
+def base_pair_distance_renorm(structure_1: Tensor, structure_2: Tensor,
+        batch_1: Optional[Tensor] = None, batch_2: Optional[Tensor] = None) -> Union[float, Tensor]:
+    """
+    Compute the base pair distance between two RNA structures
+    it corresponds to the symetric difference between the two sets of base pairs
 
-    # Remove diagonal elements
-    adj = adj - sp.dia_matrix((adj.diagonal()[np.newaxis, :], [0]), shape=adj.shape)
-    adj.eliminate_zeros()
-    # Check that diag is zero:
-    assert np.diag(adj.todense()).sum() == 0
+    :param structure1: first RNA structure
+    :param structure2: second RNA structure
+    :param batch_1: batch index for graph 1, format [sum(num_nodes) in the batch] like [0, 0, 0, 1, 1, 1, 1, 2, 2, 2]
+    :param batch_2: batch index for graph 2
+    :return: base pair distance
 
-    adj_triu = sp.triu(adj)
-    adj_tuple = sparse_to_tuple(adj_triu)
-    edges = adj_tuple[0]
-    edges_all = sparse_to_tuple(adj)[0]
-    num_test = int(np.floor(edges.shape[0] / 10.))
-    num_val = int(np.floor(edges.shape[0] / 20.))
+    Note : you have to provide the batch index for the two graphs 
+    even for a single graph
+    """
+    if batch_1 is not None and batch_2 is not None:
+        # Compute the base pair distance for each graph in the batch
+        liste = []
+        for i in range(batch_1[-1] + 1):
+            # Extract nodes id for graph
+            # and edges for the i-th graph
+            node_range_1 = torch.argwhere(batch_1 == i).flatten()
+            edges_1 = structure_1[:, torch.isin(structure_1[0, :], node_range_1)]
+            node_range_2 = torch.argwhere(batch_2 == i).flatten()
+            edges_2 = structure_2[:, torch.isin(structure_2[0, :], node_range_2)]
 
-    all_edge_idx = list(range(edges.shape[0]))
-    np.random.shuffle(all_edge_idx)
-    val_edge_idx = all_edge_idx[:num_val]
-    test_edge_idx = all_edge_idx[num_val:(num_val + num_test)]
-    test_edges = edges[test_edge_idx]
-    val_edges = edges[val_edge_idx]
-    train_edges = np.delete(edges, np.hstack([test_edge_idx, val_edge_idx]), axis=0)
+            # Compute the base pair distance for the i-th graph
+            distance = base_pair_distance(edges_1, edges_2)
+            # Renormalize the distance by the number of nodes in the two graphs
+            distance = distance / (len(node_range_1) + len(node_range_2))
 
-    def ismember(a, b, tol=5):
-        rows_close = np.all(np.round(a - b[:, None], tol) == 0, axis=-1)
-        return np.any(rows_close)
-
-    test_edges_false = []
-    while len(test_edges_false) < len(test_edges):
-        idx_i = np.random.randint(0, adj.shape[0])
-        idx_j = np.random.randint(0, adj.shape[0])
-        if idx_i == idx_j:
-            continue
-        if ismember([idx_i, idx_j], edges_all):
-            continue
-        if test_edges_false:
-            if ismember([idx_j, idx_i], np.array(test_edges_false)):
-                continue
-            if ismember([idx_i, idx_j], np.array(test_edges_false)):
-                continue
-        test_edges_false.append([idx_i, idx_j])
-
-    val_edges_false = []
-    while len(val_edges_false) < len(val_edges):
-        idx_i = np.random.randint(0, adj.shape[0])
-        idx_j = np.random.randint(0, adj.shape[0])
-        if idx_i == idx_j:
-            continue
-        if ismember([idx_i, idx_j], train_edges):
-            continue
-        if ismember([idx_j, idx_i], train_edges):
-            continue
-        if ismember([idx_i, idx_j], val_edges):
-            continue
-        if ismember([idx_j, idx_i], val_edges):
-            continue
-        if val_edges_false:
-            if ismember([idx_j, idx_i], np.array(val_edges_false)):
-                continue
-            if ismember([idx_i, idx_j], np.array(val_edges_false)):
-                continue
-        val_edges_false.append([idx_i, idx_j])
-
-    assert ~ismember(test_edges_false, edges_all)
-    assert ~ismember(val_edges_false, edges_all)
-    assert ~ismember(val_edges, train_edges)
-    assert ~ismember(test_edges, train_edges)
-    assert ~ismember(val_edges, test_edges)
-
-    data = np.ones(train_edges.shape[0])
-
-    # Re-build adj matrix
-    adj_train = sp.csr_matrix((data, (train_edges[:, 0], train_edges[:, 1])), shape=adj.shape)
-    adj_train = adj_train + adj_train.T
-
-    # NOTE: these edge lists only contain single direction of edge!
-    return adj_train, train_edges, val_edges, val_edges_false, test_edges, test_edges_false
-
-
-def get_roc_score(edges_pos, edges_neg, adj_rec):
-
-    preds = []
-    for e in edges_pos:
-        preds.append(adj_rec[e[0], e[1]])
-
-    preds_neg = []
-    for e in edges_neg:
-        preds_neg.append(adj_rec[e[0], e[1]])
-
-    preds_all = np.hstack([preds, preds_neg])
-    labels_all = np.hstack([np.ones(len(preds)), np.zeros(len(preds_neg))])
-    roc_score = roc_auc_score(labels_all, preds_all)
-    ap_score = average_precision_score(labels_all, preds_all)
-
-    return roc_score, ap_score
+            liste.append(distance)
+        return torch.tensor(liste)
+    else:
+        edges1 = set(map(tuple, structure_1.t().detach().numpy()))
+        edges2 = set(map(tuple, structure_2.t().detach().numpy()))
+        # Divide by 2 because the symetric difference counts each edge twice
+        distance = float(len(edges1.symmetric_difference(edges2)))/2
+        return distance
