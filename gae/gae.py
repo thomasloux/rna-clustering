@@ -20,7 +20,6 @@ import subprocess
 from tqdm import tqdm
 
 import matplotlib.pyplot as plt
-sns.set_theme(style="darkgrid")
 
 from time import time
 
