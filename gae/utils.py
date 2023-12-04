@@ -25,10 +25,10 @@ def base_pair_distance(structure_1: Tensor, structure_2: Tensor,
             node_range_2 = torch.argwhere(batch_2 == i).flatten()
             edges_2 = structure_2[:, torch.isin(structure_2[0, :], node_range_2)]
             liste.append(base_pair_distance(edges_1, edges_2))
-        return torch.tensor(liste)
+        return torch.tensor(liste, dtype=torch.int16, device=structure_1.device)
     else:
-        edges1 = set(map(tuple, structure_1.t().detach().numpy()))
-        edges2 = set(map(tuple, structure_2.t().detach().numpy()))
+        edges1 = set(map(tuple, structure_1.t().cpu().detach().numpy()))
+        edges2 = set(map(tuple, structure_2.t().cpu().detach().numpy()))
         # Divide by 2 because the symetric difference counts each edge twice
         distance = float(len(edges1.symmetric_difference(edges2)))/2
         return distance

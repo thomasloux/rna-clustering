@@ -15,6 +15,7 @@ from torch_geometric.transforms import RandomLinkSplit
 from torch_geometric.data import Data, InMemoryDataset, Dataset
 from torch_geometric.loader import DataLoader
 from torch.nn import functional as F
+from torch.utils.data import random_split
 from torch import Tensor
 import subprocess
 from tqdm import tqdm
@@ -111,7 +112,10 @@ def get_couple_trained_model(
     model: GAE,
     distance,
     alpha: float = 0.1,
-    root: str = "data/test") -> Tuple[GAE, list[float]]:
+    root: str = "data/test",
+    distance_from_embedding: str = "euclidean",
+    distance_loss_only: bool = False,
+    device: str = "cpu") -> Tuple[GAE, list[float]]:
     """
     Return a trained model
 
@@ -121,15 +125,24 @@ def get_couple_trained_model(
     :param alpha: weight of the distance loss
     :return: trained model
     """
+    # Check arguments
+    if distance_from_embedding not in ["euclidean", "scalar_product"]:
+        raise ValueError("distance_from_embedding must be either euclidean or scalar_product")
+
+    device = torch.device(device)
+    model = model.to(device)
 
     # Load data
     data = One_RNA_Dataset(root=root)
     data = PairDataset(data, data, sample=True)
-    data_batch = DataLoader(data, batch_size=16, shuffle=False, follow_batch=["x_1", "x_2"])
-    print(len(data))
-    #### ADD TRANSFORM HERE ###
-    # Normalize for the distance, maybe 2*size of the sequence
-    
+    data_batch = DataLoader(
+        data,
+        batch_size=16,
+        shuffle=False,
+        follow_batch=["x_1", "x_2"],
+        num_workers=10)
+
+
     # Optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
@@ -149,25 +162,25 @@ def get_couple_trained_model(
         model.train()
         optimizer.zero_grad()
 
+        # To device
+        data_batch = data_batch.to(device)
+
         # Compute reconstuction loss for graph1
         z1 = model.encode(data_batch.x_1, data_batch.edge_index_1)
-        # Renormalize the embeddings
-        z1_renorm = z1 / torch.norm(z1, dim=1).unsqueeze(1)
-        loss1 = model.recon_loss(z1_renorm, data_batch.edge_index_1)
 
         # Compute reconstuction loss for graph2
         z2 = model.encode(data_batch.x_2, data_batch.edge_index_2)
-        # Renormalize the embeddings
-        z2_renorm = z2 / torch.norm(z2, dim=1).unsqueeze(1)
-        loss2 = model.recon_loss(z2_renorm, data_batch.edge_index_2)
 
         # Compute loss distance and scalar product between embeddings
         graph1_embedding = torch_geometric.nn.pool.global_mean_pool(z1, data_batch.x_1_batch)
         graph2_embedding = torch_geometric.nn.pool.global_mean_pool(z2, data_batch.x_2_batch)
-        scalar_product = - (graph1_embedding * graph2_embedding).sum(axis=1)  # Scalar product between embeddings
-        # euclidean_distance = torch.norm(graph1_embedding - graph2_embedding, dim=1)  # Euclidean distance between embeddings
-        #print("Euclidean distance", euclidean_distance.mean())
-        #print("Scalar product", scalar_product.mean())
+
+        distance_predicted = 0
+        if distance_from_embedding == "euclidean":
+            distance_predicted = torch.norm(graph1_embedding - graph2_embedding, dim=1)  # Euclidean distance between embeddings
+        else:
+            distance_predicted = (graph1_embedding * graph2_embedding).sum(axis=1)  # Scalar product between embeddings
+        
         distances = distance(
             data_batch.edge_index_1,
             data_batch.edge_index_2,
@@ -175,16 +188,27 @@ def get_couple_trained_model(
             batch_2=data_batch.x_2_batch
         )
         #print("Distance", distances.mean())
-        distance_loss = (scalar_product - distances)**2
+        distance_loss = (distance_predicted - distances)**2
 
-        # Total loss
-        loss = (loss1 + loss2) + alpha * distance_loss.mean()
-        #print("Loss recontuction ", loss1 + loss2, "Distance loss", (alpha * distance_loss.mean()))
-        loss.backward()
-        optimizer.step()
+        if distance_loss_only:
+            loss = distance_loss.mean()
+            loss.backward()
+            optimizer.step()
 
-        nb_graphs = data_batch.x_1_batch[-1] + 1
-        return loss * nb_graphs, (loss1 + loss2) * nb_graphs, alpha * distance_loss.sum()
+            nb_graphs = data_batch.x_1_batch[-1] + 1
+            return loss*nb_graphs, 0, loss.mean()
+
+        else:
+            loss1 = model.recon_loss(z1, data_batch.edge_index_1)
+            loss2 = model.recon_loss(z2, data_batch.edge_index_2)
+            # Total loss
+            loss = (loss1 + loss2) + alpha * distance_loss.mean()
+            #print("Loss recontuction ", loss1 + loss2, "Distance loss", (alpha * distance_loss.mean()))
+            loss.backward()
+            optimizer.step()
+
+            nb_graphs = data_batch.x_1_batch[-1] + 1
+            return loss * nb_graphs, (loss1 + loss2) * nb_graphs, distance_loss.sum()
 
     total_loss_record = []
     total_loss_reconstruction_record = []

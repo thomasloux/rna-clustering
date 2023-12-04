@@ -1,7 +1,7 @@
 # file to allow quick test of the model 
 # use arg parser to allow for different parameters from the command line
 
-from gae import get_couple_trained_model, get_vanilla_model, 
+from gae import get_couple_trained_model, get_vanilla_model
 from utils import base_pair_distance
 
 import os
@@ -49,7 +49,14 @@ if os.path.exists(os.path.join("models", name)):
 
 print(f"Training : alpha: {alpha}, size: {hidden_size}")
 model = get_vanilla_model(hidden_channels=hidden_size)
-model, losses_liste = get_couple_trained_model(epoch=epoch, model=model, distance=base_pair_distance, alpha=alpha)
+model, losses_liste = get_couple_trained_model(
+    epoch=epoch,
+    model=model,
+    distance=base_pair_distance,
+    alpha=alpha,
+    device=device_name,
+    distance_from_embedding="euclidean",
+    distance_loss_only=False)
 
 names = ["total_loss_record", "total_loss_reconstruction_record", "total_loss_distance_record"]
 #total_loss_record, total_loss_reconstruction_record, total_loss_distance_record = losses_liste
