@@ -1,6 +1,12 @@
 # rna-clustering
 Using GNN to cluster non coding RNA
 
+## Run training
+While being in ./rna-clustering
+python gae/train.py --epoch 30 --alpha 0.1 --hidden-size 32 --name test_eval --device cuda --distance_loss_on
+ly True
+See train.py for more details about the arguments
+
 ## Useful functions
 RNA (from ViennaRNA)
 - `fold` : RNA secondary structure prediction
