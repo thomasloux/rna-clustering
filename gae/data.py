@@ -141,7 +141,13 @@ class PairData(Data):
         Enforce the necessary arguments to be PairData objects
         """
         super(PairData, self).__init__(
-            x_1=x_1, edge_index_1=edge_index_1, edge_attr_1=edge_attr_1, x_2=x_2, edge_index_2=edge_index_2, edge_attr_2=edge_attr_2, **kwargs
+            x_1=x_1,
+            edge_index_1=edge_index_1,
+            edge_attr_1=edge_attr_1,
+            x_2=x_2,
+            edge_index_2=edge_index_2,
+            edge_attr_2=edge_attr_2,
+            **kwargs
             )
         
     def __inc__(self, key, value, *args):

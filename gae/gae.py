@@ -41,23 +41,6 @@ class Encoder(torch.nn.Module):
         return x
 
 
-def get_device() -> torch.device:
-    """
-    Get device for training (GPU or other acceleration if available)
-
-    :return: torch.device object
-
-    - MPS or Metal Performance Shaders is a GPU acceleration library for ARM Macs
-    - Cuda is a GPU acceleration library for Nvidia GPUs
-    """
-    if torch.cuda.is_available():
-        device = torch.device('cuda')
-    elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
-        device = torch.device('mps')
-    else:
-        device = torch.device('cpu')
-    return device
-
 
 def get_vanilla_model(hidden_channels) -> GAE:
     """
