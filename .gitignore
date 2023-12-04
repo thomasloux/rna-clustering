@@ -1,6 +1,5 @@
 data/
-gae/models/
-gae/figures
+models/
 gae/__pycache__/
 *.ipynb
 *.jar
