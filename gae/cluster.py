@@ -44,7 +44,7 @@ def dissimilarity_matrix(dataset: Dataset) -> np.ndarray:
                 batch_2=data.x_2_batch.to(device))
             distance_liste.append(distances.cpu().detach())
 
-    X = np.concat(distance_liste)
+    X = torch.cat(distance_liste)
     X = X.reshape((len(dataset), len(dataset)))
     return X
     
