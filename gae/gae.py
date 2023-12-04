@@ -7,7 +7,6 @@ import pandas as pd
 import os
 import os.path as osp
 from typing import Sequence, Optional, Tuple, Union
-
 import torch_geometric
 from torch_geometric.nn.models.autoencoder import GAE
 from torch_geometric import nn
@@ -19,17 +18,16 @@ from torch.utils.data import random_split
 from torch import Tensor
 import subprocess
 from tqdm import tqdm
-
 import matplotlib.pyplot as plt
-
 from time import time
-
 from data import One_RNA_Dataset, PairDataset
+import logging
 
 
 class Encoder(torch.nn.Module):
     def __init__(self, in_channels: int, hidden_channels: int) -> None:
         super(Encoder, self).__init__()
+        self.hidden_channels = hidden_channels
         self.conv1 = nn.GCNConv(in_channels, hidden_channels)
         self.conv2 = nn.GCNConv(hidden_channels, hidden_channels)
         self.conv3 = nn.GCNConv(hidden_channels, hidden_channels)
@@ -76,6 +74,7 @@ def get_couple_trained_model(
     epoch: int,
     model: GAE,
     distance,
+    save_folder: str,
     alpha: float = 0.1,
     root: str = "data/test",
     distance_from_embedding: str = "euclidean",
@@ -90,23 +89,40 @@ def get_couple_trained_model(
     :param alpha: weight of the distance loss
     :return: trained model
     """
+
     # Check arguments
     if distance_from_embedding not in ["euclidean", "scalar_product"]:
         raise ValueError("distance_from_embedding must be either euclidean or scalar_product")
+
+    # Check if model already exists
+    # if os.path.exists(os.path.join("models", save_folder)) and not os.path.isdir(os.path.join("models", save_folder)):
+    #     raise ValueError("Model already exists")
+    # os.mkdir(os.path.join("models", save_folder))
 
     device = torch.device(device)
     model = model.to(device)
 
     # Load data
     data = One_RNA_Dataset(root=root)
-    data = PairDataset(data, data, sample=True)
-    data_batch = DataLoader(
-        data,
+    train_data, test_data = random_split(data, [0.8, 0.2])
+
+    # Training Data
+    train_data_pair = PairDataset(train_data, train_data, sample=True)
+    train_loader = DataLoader(
+        train_data_pair,
+        batch_size=16,
+        shuffle=True,
+        follow_batch=["x_1", "x_2"],
+        num_workers=10)
+
+    # Test Data
+    test_data_pair = PairDataset(test_data, test_data, sample=True)
+    test_loader = DataLoader(
+        test_data_pair,
         batch_size=16,
         shuffle=False,
         follow_batch=["x_1", "x_2"],
         num_workers=10)
-
 
     # Optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
@@ -152,50 +168,86 @@ def get_couple_trained_model(
             batch_1=data_batch.x_1_batch,
             batch_2=data_batch.x_2_batch
         )
-        #print("Distance", distances.mean())
+
         distance_loss = (distance_predicted - distances)**2
 
         if distance_loss_only:
             loss = distance_loss.mean()
+
             loss.backward()
             optimizer.step()
 
             nb_graphs = data_batch.x_1_batch[-1] + 1
-            return loss*nb_graphs, 0, loss.mean()
+            return loss*nb_graphs, torch.tensor([0], device=device, dtype=torch.float32), loss*nb_graphs
 
         else:
             loss1 = model.recon_loss(z1, data_batch.edge_index_1)
             loss2 = model.recon_loss(z2, data_batch.edge_index_2)
-            # Total loss
             loss = (loss1 + loss2) + alpha * distance_loss.mean()
-            #print("Loss recontuction ", loss1 + loss2, "Distance loss", (alpha * distance_loss.mean()))
+
             loss.backward()
             optimizer.step()
 
             nb_graphs = data_batch.x_1_batch[-1] + 1
             return loss * nb_graphs, (loss1 + loss2) * nb_graphs, distance_loss.sum()
 
+    # Training loop 
+    # Loss training
     total_loss_record = []
     total_loss_reconstruction_record = []
     total_loss_distance_record = []
+
+    # Loss eval
+    total_loss_test_record = []
+    total_loss_reconstruction_test_record = []
+    total_loss_distance_test_record = []
+
+    # Best epoch records (for saving the model)
+    best_loss = np.inf
+    best_epoch = 0
+
+    # Training loop
     for e in tqdm(range(epoch)):
-        loss = 0
-        loss_reconstruction = 0
-        loss_distance = 0
-        for batch in data_batch:
+        loss = torch.tensor([0], device=device, dtype=torch.float32)
+        loss_reconstruction = torch.tensor([0], device=device, dtype=torch.float32)
+        loss_distance = torch.tensor([0], device=device, dtype=torch.float32)
+        for batch in train_loader:
             loss_batch, loss_reconstruction_batch, loss_distance_batch = train(batch)
             loss += loss_batch
             loss_reconstruction += loss_reconstruction_batch
             loss_distance += loss_distance_batch
-        total_loss_record.append(float(loss.detach())/len(data))
-        total_loss_reconstruction_record.append(float(loss_reconstruction.detach()/len(data)))
-        total_loss_distance_record.append(float(loss_distance.detach())/len(data))
+        total_loss_record.append(loss.item()/len(train_data))
+        total_loss_reconstruction_record.append(loss_reconstruction.item()/len(train_data))
+        total_loss_distance_record.append(loss_distance.item()/len(train_data))
+
+        if e % (max(1, epoch//20)) == 0:
+            # Evaluate model on test data
+            loss_test = 0
+            loss_reconstruction_test = 0
+            loss_distance_test = 0
+            for batch in test_loader:
+                loss_batch, loss_reconstruction_batch, loss_distance_batch = train(batch)
+                loss_test += loss_batch
+                loss_reconstruction_test += loss_reconstruction_batch
+                loss_distance_test += loss_distance_batch
+            total_loss_test_record.append(loss_test.item()/len(test_data))
+            total_loss_reconstruction_test_record.append(loss_reconstruction_test.item()/len(test_data))
+            total_loss_distance_test_record.append(loss_distance_test.item()/len(test_data))
+
+            # Save model if it is the best one
+            if loss_test < best_loss:
+                best_loss = loss_test
+                best_epoch = e
+                torch.save(model.state_dict(), os.path.join("models", save_folder, "best_model.pt"))
     
-    print("Total loss", total_loss_record[-1])
-    print("Reconstruction loss", total_loss_reconstruction_record[-1])
-    print("Distance loss", total_loss_distance_record[-1])
-        # if e % (epoch//10) == 0:
-        #      print(f"Epoch: {e:03d}, Loss: {loss:.4f}")
+    # Save last model
+    name_model = f"alpha_{alpha}_hidden_size_{model.encoder.hidden_channels}_epoch_{epoch}_distance_loss_only_{distance_loss_only}_last_epoch"
+    torch.save(model, os.path.join("models", save_folder, name_model + ".pt"))
+
+
+    logging.info(f"Total loss {total_loss_record[-1]}")
+    logging.info(f"Reconstruction loss {total_loss_reconstruction_record[-1]}")
+    logging.info(f"Distance loss {total_loss_distance_record[-1]}")
     return model, [total_loss_record, total_loss_reconstruction_record, total_loss_distance_record]
 
 

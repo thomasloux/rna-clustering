@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import argparse
+import logging
 
 # Parse argument
 parser = argparse.ArgumentParser()
@@ -33,6 +34,10 @@ parser.add_argument("--device",
                     type=str,
                     default="cpu",
                     help="Device to use for training")
+parser.add_argument("--distance_loss_only",
+                    type=bool,
+                    default=False,
+                    help="Only use distance loss for training")
 
 #########
 
@@ -42,28 +47,32 @@ alpha = args.alpha
 hidden_size = args.hidden_size
 name = args.name
 device_name = args.device
+distance_loss_only = args.distance_loss_only
 
 # Check if model already exists
-if os.path.exists(os.path.join("models", name)):
+if os.path.exists(os.path.join("models", name)) and not os.path.isdir(os.path.join("models", name)):
     raise ValueError("Model already exists")
+os.mkdir(os.path.join("models", name))
 
 print(f"Training : alpha: {alpha}, size: {hidden_size}")
 model = get_vanilla_model(hidden_channels=hidden_size)
-model, losses_liste = get_couple_trained_model(
-    epoch=epoch,
-    model=model,
-    distance=base_pair_distance,
-    alpha=alpha,
-    device=device_name,
-    distance_from_embedding="euclidean",
-    distance_loss_only=False)
+logging.basicConfig(filename=os.path.join("models", name, "log.txt"), level=logging.INFO)
+try:
+    model, losses_liste = get_couple_trained_model(
+        epoch=epoch,
+        model=model,
+        distance=base_pair_distance,
+        save_folder=name,
+        alpha=alpha,
+        device=device_name,
+        distance_from_embedding="euclidean",
+        distance_loss_only=distance_loss_only)
+except Exception as e:
+    logging.exception(e)
+    raise e
 
 names = ["total_loss_record", "total_loss_reconstruction_record", "total_loss_distance_record"]
 #total_loss_record, total_loss_reconstruction_record, total_loss_distance_record = losses_liste
-
-os.mkdir(os.path.join("models", name))
-name_model = f"alpha_{alpha}_hidden_size_{hidden_size}_epoch_{epoch}"
-torch.save(model, os.path.join("models", name, name_model + ".pt"))
 
 for i in range(len(losses_liste)):
     plt.plot(losses_liste[i], label=names[i])
@@ -71,7 +80,7 @@ for i in range(len(losses_liste)):
     plt.ylabel('Train loss')
     #plt.yscale('log')
     plt.legend()
-plt.savefig(os.path.join("models", name, name_model + ".png"))
+plt.savefig(os.path.join("models", name, "figure.png"))
 plt.close()
 
 
