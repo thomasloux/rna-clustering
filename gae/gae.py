@@ -31,15 +31,13 @@ class Encoder(torch.nn.Module):
         self.conv1 = nn.GCNConv(in_channels, hidden_channels)
         self.conv2 = nn.GCNConv(hidden_channels, hidden_channels)
         self.conv3 = nn.GCNConv(hidden_channels, hidden_channels)
-        self.conv4 = nn.GCNConv(hidden_channels, hidden_channels)
 
     def forward(
         self, x: torch.Tensor, edge_index: torch.Tensor
     ) -> torch.Tensor:
         x = self.conv1(x, edge_index).relu()
         x = self.conv2(x, edge_index).relu()
-        x = self.conv3(x, edge_index).relu()
-        x = self.conv4(x, edge_index)
+        x = self.conv3(x, edge_index)
         return x
 
 
@@ -248,7 +246,10 @@ def get_couple_trained_model(
     logging.info(f"Total loss {total_loss_record[-1]}")
     logging.info(f"Reconstruction loss {total_loss_reconstruction_record[-1]}")
     logging.info(f"Distance loss {total_loss_distance_record[-1]}")
-    return model, [total_loss_record, total_loss_reconstruction_record, total_loss_distance_record]
+
+    loss_training = [total_loss_record, total_loss_reconstruction_record, total_loss_distance_record]
+    loss_eval = [total_loss_test_record, total_loss_reconstruction_test_record, total_loss_distance_test_record]
+    return model, loss_training, loss_eval
 
 
 def test_model_reconstruction(model, dataset):

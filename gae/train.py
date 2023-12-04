@@ -58,7 +58,7 @@ print(f"Training : alpha: {alpha}, size: {hidden_size}")
 model = get_vanilla_model(hidden_channels=hidden_size)
 logging.basicConfig(filename=os.path.join("models", name, "log.txt"), level=logging.INFO)
 try:
-    model, losses_liste = get_couple_trained_model(
+    model, losses_liste_training, losses_liste_eval = get_couple_trained_model(
         epoch=epoch,
         model=model,
         distance=base_pair_distance,
@@ -71,16 +71,20 @@ except Exception as e:
     logging.exception(e)
     raise e
 
-names = ["total_loss_record", "total_loss_reconstruction_record", "total_loss_distance_record"]
-#total_loss_record, total_loss_reconstruction_record, total_loss_distance_record = losses_liste
+def save_losses(losses_liste, name_loss):
+    names = ["total_loss_record", "total_loss_reconstruction_record", "total_loss_distance_record"]
+    #total_loss_record, total_loss_reconstruction_record, total_loss_distance_record = losses_liste
 
-for i in range(len(losses_liste)):
-    plt.plot(losses_liste[i], label=names[i])
-    plt.xlabel('Epoch')
-    plt.ylabel('Train loss')
-    #plt.yscale('log')
-    plt.legend()
-plt.savefig(os.path.join("models", name, "figure.png"))
-plt.close()
+    for i in range(len(losses_liste)):
+        plt.plot(losses_liste[i], label=names[i])
+        plt.xlabel('Epoch')
+        plt.ylabel('Train loss')
+        #plt.yscale('log')
+        plt.legend()
+    plt.savefig(os.path.join("models", name, name_loss + " figure.png"))
+    plt.close()
+
+save_losses(losses_liste_training, "training")
+save_losses(losses_liste_eval, "eval")
 
 

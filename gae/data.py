@@ -169,8 +169,7 @@ class PairDataset(torch.utils.data.Dataset):
         self.sample = sample
 
     def __len__(self):
-        return len(self.dataset_1) if self.sample else len(
-            self.dataset_1) * len(self.dataset_2)
+        return len(self.dataset_1) if self.sample else len(self.dataset_1) * len(self.dataset_2)
 
     def __getitem__(self, idx):
         if self.sample:
