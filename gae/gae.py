@@ -106,7 +106,12 @@ def get_trained_model(epoch: int, model: GAE, root: str = "data/test") -> GAE:
         #      print(f"Epoch: {e:03d}, Loss: {loss:.4f}")
     return model
 
-def get_couple_trained_model(epoch: int, model: GAE, distance, alpha: float = 1, root: str = "data/test") -> Tuple[GAE, list[float]]:
+def get_couple_trained_model(
+    epoch: int,
+    model: GAE,
+    distance,
+    alpha: float = 0.1,
+    root: str = "data/test") -> Tuple[GAE, list[float]]:
     """
     Return a trained model
 
