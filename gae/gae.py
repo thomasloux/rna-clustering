@@ -3,7 +3,6 @@
 
 import torch
 import numpy as np
-import networkx as nx
 import pandas as pd
 import os
 import os.path as osp
@@ -21,7 +20,6 @@ import subprocess
 from tqdm import tqdm
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 sns.set_theme(style="darkgrid")
 
 from time import time

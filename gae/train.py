@@ -6,7 +6,6 @@ from gae import get_couple_trained_model, base_pair_distance, get_vanilla_model
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 import torch
 import argparse
 sns.set_theme(style="darkgrid")
