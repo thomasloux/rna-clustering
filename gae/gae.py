@@ -72,41 +72,6 @@ def get_vanilla_model(hidden_channels) -> GAE:
     )
     return model
 
-
-def get_trained_model(epoch: int, model: GAE, root: str = "data/test") -> GAE:
-    """
-    Return a trained model
-
-    :param epoch: number of epochs for training
-    :param model: model to train
-    :return: trained model
-    """
-
-    # Load data
-    data = One_RNA_Dataset(root=root)
-    data_batch = DataLoader(data, batch_size=128, shuffle=True)
-
-    # Optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-
-    # Training
-    def train(graph):
-        model.train()
-        optimizer.zero_grad()
-        # Compute reconstuction loss for graph
-        z = model.encode(graph.x, graph.edge_index)
-        loss = model.recon_loss(z, graph.edge_index)
-        loss.backward()
-        optimizer.step()
-        return loss
-
-    for e in tqdm(range(epoch)):
-        for batch in data_batch:
-            train(batch)
-        # if e % (epoch//10) == 0:
-        #      print(f"Epoch: {e:03d}, Loss: {loss:.4f}")
-    return model
-
 def get_couple_trained_model(
     epoch: int,
     model: GAE,
