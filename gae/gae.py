@@ -76,21 +76,33 @@ def get_couple_trained_model(
     alpha: float = 0.1,
     root: str = "data/test",
     distance_from_embedding: str = "euclidean",
+    distance_loss: str = "L2",
     distance_loss_only: bool = False,
     device: str = "cpu") -> Tuple[GAE, list[float]]:
     """
     Return a trained model
 
-    :param epoch: number of epochs for training
-    :param model: model to train
-    :param distance: distance function to use in the loss
-    :param alpha: weight of the distance loss
+    Params:
+    - epoch: number of epochs for training
+    - model: model to train
+    - distance: function to compute distance between graphs
+    - save_folder: folder where to save the model
+    - alpha: weight of the distance loss in the total loss
+    - root: root directory where the dataset should be saved.
+        This folder is split into raw_dir (downloaded dataset) and processed_dir (processed dataset).
+    - distance_from_embedding: distance to use between embeddings (euclidean or scalar_product)
+    - distance_loss: loss to use for the distance between embeddings and predicted distance (L2 or L1)
+    - distance_loss_only: if True, only the distance loss is used for training
+    - device: device for training (GPU or other acceleration if available)
+
     :return: trained model
     """
 
     # Check arguments
     if distance_from_embedding not in ["euclidean", "scalar_product"]:
         raise ValueError("distance_from_embedding must be either euclidean or scalar_product")
+    if distance_loss not in ["L2", "L1"]:
+        raise ValueError("distance_loss must be either L2 or L1")
 
     # Check if model already exists
     # if os.path.exists(os.path.join("models", save_folder)) and not os.path.isdir(os.path.join("models", save_folder)):
@@ -167,7 +179,10 @@ def get_couple_trained_model(
             batch_2=data_batch.x_2_batch
         )
 
-        distance_loss = (distance_predicted - distances)**2
+        if distance_loss == "L1":
+            distance_loss = torch.abs(distance_predicted - distances)
+        else:
+            distance_loss = (distance_predicted - distances)**2
 
         if distance_loss_only:
             loss = distance_loss.mean()
