@@ -34,6 +34,14 @@ parser.add_argument("--device",
                     type=str,
                     default="cpu",
                     help="Device to use for training")
+parser.add_argument("--distance",
+                    type=str,
+                    default="euclidean",
+                    help="Distance to use for training")
+parser.add_argument("--distance_loss",
+                    type=str,
+                    default="L2",
+                    help="Loss to compare distance and predicted distance")
 parser.add_argument("--distance_loss_only",
                     type=bool,
                     default=False,
@@ -47,6 +55,8 @@ alpha = args.alpha
 hidden_size = args.hidden_size
 name = args.name
 device_name = args.device
+distance = args.distance
+distance_loss = args.distance_loss
 distance_loss_only = args.distance_loss_only
 
 # Check if model already exists
@@ -54,9 +64,21 @@ if os.path.exists(os.path.join("models", name)) and not os.path.isdir(os.path.jo
     raise ValueError("Model already exists")
 os.mkdir(os.path.join("models", name))
 
+logging.basicConfig(filename=os.path.join("models", name, "log.txt"), level=logging.INFO)
+
+# Write the parameters in a file
+with open(os.path.join("models", name, "parameters.txt"), "w") as f:
+    f.write(f"Epoch: {epoch}\n")
+    f.write(f"Alpha: {alpha}\n")
+    f.write(f"Hidden size: {hidden_size}\n")
+    f.write(f"Device: {device_name}\n")
+    f.write(f"Distance: {distance}\n")
+    f.write(f"Distance loss: {distance_loss}\n")
+    f.write(f"Distance loss only: {distance_loss_only}\n")
+
 print(f"Training : alpha: {alpha}, size: {hidden_size}")
 model = get_vanilla_model(hidden_channels=hidden_size)
-logging.basicConfig(filename=os.path.join("models", name, "log.txt"), level=logging.INFO)
+
 try:
     model, losses_liste_training, losses_liste_eval = get_couple_trained_model(
         epoch=epoch,
