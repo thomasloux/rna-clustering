@@ -2,6 +2,13 @@ import numpy as np
 import torch
 from torch import Tensor
 from typing import Optional, Union
+from torch_geometric.data import Dataset, DataLoader
+from torch_geometric.nn import GAE
+from torch_geometric.nn.pool import global_mean_pool
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+from data import PairDataset
 
 
 def base_pair_distance(structure_1: Tensor, structure_2: Tensor,
@@ -72,3 +79,57 @@ def base_pair_distance_renorm(structure_1: Tensor, structure_2: Tensor,
         # Divide by 2 because the symetric difference counts each edge twice
         distance = float(len(edges1.symmetric_difference(edges2)))/2
         return distance
+
+# Make the graph of real distance vs predicted distance
+def plot_correlation_prediction(model: GAE, dataset: Dataset, title: str):
+    """
+    Plot the correlation between the real distance and the predicted distance.
+
+    :param dataset: dataset to use
+    :param title: title of the plot (train or test)
+    """
+    real_distances = []
+    predicted_distances = []
+
+    # Prepare the data loader
+    pair_dataset = PairDataset(dataset, dataset, sample=True)
+    loader = DataLoader(
+        pair_dataset,
+        batch_size=16,
+        shuffle=False,
+        follow_batch=["x_1", "x_2"],
+        num_workers=20)
+
+    for data in tqdm(loader):
+        # Compute the real distance
+        real_distances.append(
+            base_pair_distance(
+                data.edge_index_1,
+                data.edge_index_2,
+                data.x_1_batch,
+                data.x_2_batch
+            )
+        )
+        # Compute the predicted distance
+        with torch.no_grad():
+            z1 = model.encode(data.x_1, data.edge_index_1)
+            z2 = model.encode(data.x_2, data.edge_index_2)
+
+            graph1_embedding = global_mean_pool(z1, data.x_1_batch)
+            graph2_embedding = global_mean_pool(z2, data.x_2_batch)
+
+            predicted_distances.append(
+                torch.norm(graph1_embedding - graph2_embedding, dim=1)
+            )
+
+    real_distances = torch.cat(real_distances).detach().numpy()
+    predicted_distances = torch.cat(predicted_distances).detach().numpy()
+
+    fig = plt.figure()
+    plt.scatter(real_distances, predicted_distances)
+    plt.xlabel("Real distance")
+    plt.ylabel("Predicted distance")
+    plt.title("Real distance vs predicted distance " + title)
+    # Plot the identity line
+    plt.plot([0, np.max(real_distances)], [0, np.max(real_distances)], c='black', linestyle='--')
+    return fig, real_distances, predicted_distances
