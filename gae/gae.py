@@ -25,29 +25,32 @@ import logging
 
 
 class Encoder(torch.nn.Module):
-    def __init__(self, in_channels: int, hidden_channels: int) -> None:
+    def __init__(self, in_channels: int, hidden_channels: int, layer: nn.MessagePassing) -> None:
         super(Encoder, self).__init__()
         self.hidden_channels = hidden_channels
-        self.conv1 = nn.GCNConv(in_channels, hidden_channels)
-        self.conv2 = nn.GCNConv(hidden_channels, hidden_channels)
-        self.conv3 = nn.GCNConv(hidden_channels, hidden_channels)
+        self.conv1 = layer(in_channels, hidden_channels)
+        self.conv2 = layer(hidden_channels, hidden_channels)
+        self.conv3 = layer(hidden_channels, hidden_channels)
+
+        self.dropout = torch.nn.Dropout(p=0.1)
 
     def forward(
         self, x: torch.Tensor, edge_index: torch.Tensor
     ) -> torch.Tensor:
         x = self.conv1(x, edge_index).relu()
+        x = self.dropout(x)
         x = self.conv2(x, edge_index).relu()
         x = self.conv3(x, edge_index)
         return x
 
 
 
-def get_vanilla_model(hidden_channels) -> GAE:
+def get_vanilla_model(hidden_channels, layer) -> GAE:
     """
     Get vanilla GAE model
     """
     model = GAE(
-        Encoder(in_channels=4, hidden_channels=hidden_channels),
+        Encoder(in_channels=4, hidden_channels=hidden_channels, layer=layer),
     )
     return model
 
@@ -55,9 +58,10 @@ def get_couple_trained_model(
     epoch: int,
     model: GAE,
     distance,
+    train_data: Dataset,
+    test_data: Dataset,
     save_folder: str,
     alpha: float = 0.1,
-    root: str = "data/test",
     distance_from_embedding: str = "euclidean",
     distance_loss: str = "L2",
     distance_loss_only: bool = False,
@@ -71,8 +75,6 @@ def get_couple_trained_model(
     - distance: function to compute distance between graphs
     - save_folder: folder where to save the model
     - alpha: weight of the distance loss in the total loss
-    - root: root directory where the dataset should be saved.
-        This folder is split into raw_dir (downloaded dataset) and processed_dir (processed dataset).
     - distance_from_embedding: distance to use between embeddings (euclidean or scalar_product)
     - distance_loss: loss to use for the distance between embeddings and predicted distance (L2 or L1)
     - distance_loss_only: if True, only the distance loss is used for training
@@ -94,10 +96,6 @@ def get_couple_trained_model(
 
     device = torch.device(device)
     model = model.to(device)
-
-    # Load data
-    data = One_RNA_Dataset(root=root)
-    train_data, test_data = random_split(data, [0.8, 0.2])
 
     # Training Data
     train_data_pair = PairDataset(train_data, train_data, sample=True)
@@ -121,7 +119,7 @@ def get_couple_trained_model(
     optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
 
     # Training
-    def train(data_batch):
+    def train(data_batch, mode="train"):
         """
         Train the model on a batch of data
 
@@ -133,8 +131,16 @@ def get_couple_trained_model(
         - x_1_batch: batch index for graph 1, format [sum(num_nodes) in the batch]
         - x_2_batch: batch index for graph 2
         """
-        model.train()
-        optimizer.zero_grad()
+        if mode == "train":
+            model.train()
+            optimizer.zero_grad()
+        
+        elif mode == "eval":
+            model.eval()
+
+
+        else:
+            raise ValueError("mode must be either train or eval")
 
         # To device
         data_batch = data_batch.to(device)
@@ -163,15 +169,16 @@ def get_couple_trained_model(
         )
 
         if distance_loss == "L1":
-            distance_loss = torch.abs(distance_predicted - distances)
+            distance_loss_value = torch.abs(distance_predicted - distances)
         else:
-            distance_loss = (distance_predicted - distances)**2
+            distance_loss_value = (distance_predicted - distances)**2
 
         if distance_loss_only:
-            loss = distance_loss.mean()
+            loss = distance_loss_value.mean()
 
-            loss.backward()
-            optimizer.step()
+            if mode == "train":
+                loss.backward()
+                optimizer.step()
 
             nb_graphs = data_batch.x_1_batch[-1] + 1
             return loss*nb_graphs, torch.tensor([0], device=device, dtype=torch.float32), loss*nb_graphs
@@ -179,13 +186,14 @@ def get_couple_trained_model(
         else:
             loss1 = model.recon_loss(z1, data_batch.edge_index_1)
             loss2 = model.recon_loss(z2, data_batch.edge_index_2)
-            loss = (loss1 + loss2) + alpha * distance_loss.mean()
+            loss = (loss1 + loss2) + alpha * distance_loss_value.mean()
 
-            loss.backward()
-            optimizer.step()
+            if mode == "train":
+                loss.backward()
+                optimizer.step()
 
             nb_graphs = data_batch.x_1_batch[-1] + 1
-            return loss * nb_graphs, (loss1 + loss2) * nb_graphs, distance_loss.sum()
+            return loss * nb_graphs, (loss1 + loss2) * nb_graphs, distance_loss_value.sum()
 
     # Training loop 
     # Loss training
@@ -208,7 +216,7 @@ def get_couple_trained_model(
         loss_reconstruction = torch.tensor([0], device=device, dtype=torch.float32)
         loss_distance = torch.tensor([0], device=device, dtype=torch.float32)
         for batch in train_loader:
-            loss_batch, loss_reconstruction_batch, loss_distance_batch = train(batch)
+            loss_batch, loss_reconstruction_batch, loss_distance_batch = train(batch, mode="train")
             loss += loss_batch
             loss_reconstruction += loss_reconstruction_batch
             loss_distance += loss_distance_batch
@@ -222,7 +230,8 @@ def get_couple_trained_model(
             loss_reconstruction_test = 0
             loss_distance_test = 0
             for batch in test_loader:
-                loss_batch, loss_reconstruction_batch, loss_distance_batch = train(batch)
+                with torch.no_grad():
+                    loss_batch, loss_reconstruction_batch, loss_distance_batch = train(batch, mode="eval")
                 loss_test += loss_batch
                 loss_reconstruction_test += loss_reconstruction_batch
                 loss_distance_test += loss_distance_batch
@@ -241,9 +250,13 @@ def get_couple_trained_model(
     torch.save(model, os.path.join("models", save_folder, name_model + ".pt"))
 
 
-    logging.info(f"Total loss {total_loss_record[-1]}")
-    logging.info(f"Reconstruction loss {total_loss_reconstruction_record[-1]}")
-    logging.info(f"Distance loss {total_loss_distance_record[-1]}")
+    logging.info(f"Total loss training {total_loss_record[-1]}")
+    logging.info(f"Reconstruction loss training {total_loss_reconstruction_record[-1]}")
+    logging.info(f"Distance loss training {total_loss_distance_record[-1]}")
+
+    logging.info(f"Total loss test {total_loss_test_record[-1]}")
+    logging.info(f"Reconstruction loss test {total_loss_reconstruction_test_record[-1]}")
+    logging.info(f"Distance loss test {total_loss_distance_test_record[-1]}")
 
     loss_training = [total_loss_record, total_loss_reconstruction_record, total_loss_distance_record]
     loss_eval = [total_loss_test_record, total_loss_reconstruction_test_record, total_loss_distance_test_record]
