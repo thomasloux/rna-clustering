@@ -10,6 +10,8 @@ import random
 import subprocess
 import os.path as osp
 import torch.nn.functional as F
+import numpy as np
+import pandas as pd
 
 class One_RNA_Dataset(Dataset):
     """
@@ -80,8 +82,15 @@ class One_RNA_Dataset(Dataset):
             ],
             dim=1
         )
+        # Hot one encoding of the edge type
+        edge_attributes = torch.cat(
+            [
+                torch.tensor([[1, 0]]).repeat(edge_index_strong.size(1)*2, 1),
+                torch.tensor([[0, 1]]).repeat(edge_index_weak.size(1)*2, 1)
+            ]
+        )
          
-        data = Data(x=x, edge_index=edge_pairs)
+        data = Data(x=x, edge_index=edge_pairs, edge_attr=edge_attributes, num_nodes=len(sequence), edge_attr=edge_attributes)
 
         return data
 
@@ -103,7 +112,13 @@ class One_RNA_Dataset(Dataset):
         # Return dot-bracket structure, energy and probability
 
         ## Use a sample of the suboptimal structures
-        command = subprocess.run(["RNAsubopt", "--stochBT=" + str(n), "-i", input_file, "--sorted", "--nonRedundant"], capture_output=True)
+        command = subprocess.run([
+            "RNAsubopt",
+            "--stochBT_en=" + str(n),
+            "-i", input_file,
+            "--sorted",
+            "--nonRedundant",
+            "-T=80"], capture_output=True)
 
         ## Use all the suboptimal structures with a max energy from optimal structure
         # command = subprocess.run["RNAsubopt", "-e", str(n), "-i", input_file]
@@ -119,6 +134,9 @@ class One_RNA_Dataset(Dataset):
             sequence = f.readline().strip()
 
         structures = self.generate_suboptimal_structures(self.raw_paths[0], n=self.n)
+
+        df = pd.DataFrame(structures, columns=['structure'])
+
         data_list = [self.structure_to_data(structure, sequence) for structure in structures]
         print(f"Number of structures : {len(data_list)}")
 
@@ -180,8 +198,8 @@ class PairDataset(torch.utils.data.Dataset):
             Use False for training and True for testing between multiple models
     """
     def __init__(self, dataset_1, dataset_2, sample=False, remove_random=False):
-        if sample and remove_random:
-            raise ValueError("sample and remove_random cannot be True at the same time")
+        if not sample and remove_random:
+            raise ValueError("Cannot remove random if sample is False")
         self.dataset_1 = dataset_1
         self.dataset_2 = dataset_2
         self.sample = sample
