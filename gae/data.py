@@ -103,7 +103,7 @@ class One_RNA_Dataset(Dataset):
         # Return dot-bracket structure, energy and probability
 
         ## Use a sample of the suboptimal structures
-        command = subprocess.run(["RNAsubopt", "--stochBT=" + str(n), "-i", input_file], capture_output=True)
+        command = subprocess.run(["RNAsubopt", "--stochBT=" + str(n), "-i", input_file, "--sorted", "--nonRedundant"], capture_output=True)
 
         ## Use all the suboptimal structures with a max energy from optimal structure
         # command = subprocess.run["RNAsubopt", "-e", str(n), "-i", input_file]
@@ -174,19 +174,32 @@ class PairDataset(torch.utils.data.Dataset):
         sample (bool, optional): If set to :obj:`True`, will sample exactly
             one target example for every source example instead of holding the
             product of all source and target examples. (default: :obj:`False`)
+        remove_random (bool, optional): If set to :obj:`True`, will remove
+            random target examples for every source example. (default: :obj:`False`)
+            If True, the pairs will always be the same
+            Use False for training and True for testing between multiple models
     """
-    def __init__(self, dataset_1, dataset_2, sample=False):
+    def __init__(self, dataset_1, dataset_2, sample=False, remove_random=False):
+        if sample and remove_random:
+            raise ValueError("sample and remove_random cannot be True at the same time")
         self.dataset_1 = dataset_1
         self.dataset_2 = dataset_2
         self.sample = sample
+        self.remove_random = remove_random
+        self.rng = np.random.default_rng(seed=42)
+        if self.remove_random:
+            self.random_index = self.rng.integers(0, len(self.dataset_2), size=len(self.dataset_1))
 
     def __len__(self):
         return len(self.dataset_1) if self.sample else len(self.dataset_1) * len(self.dataset_2)
 
     def __getitem__(self, idx):
         if self.sample:
+            if self.remove_random:
+                data_2 = self.dataset_2[self.random_index[idx]]
+            else:
+                data_2 = self.dataset_2[self.rng.integers(0, len(self.dataset_2))]
             data_1 = self.dataset_1[idx]
-            data_2 = self.dataset_2[random.randint(0, len(self.dataset_2) - 1)]
         else:
             data_1 = self.dataset_1[idx // len(self.dataset_2)]
             data_2 = self.dataset_2[idx % len(self.dataset_2)]
