@@ -35,12 +35,12 @@ class Encoder(torch.nn.Module):
         self.dropout = torch.nn.Dropout(p=0.1)
 
     def forward(
-        self, x: torch.Tensor, edge_index: torch.Tensor
+        self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        x = self.conv1(x, edge_index).relu()
+        x = self.conv1(x, edge_index, edge_attr).relu()
         x = self.dropout(x)
-        x = self.conv2(x, edge_index).relu()
-        x = self.conv3(x, edge_index)
+        x = self.conv2(x, edge_index, edge_attr).relu()
+        x = self.conv3(x, edge_index, edge_attr)
         return x
 
 
