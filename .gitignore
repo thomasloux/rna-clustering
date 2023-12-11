@@ -3,3 +3,4 @@ models/
 gae/__pycache__/
 *.jar
 .DS_Store
+/gae/figures/
