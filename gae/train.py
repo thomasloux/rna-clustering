@@ -140,9 +140,13 @@ plt.close()
 
 ###
 model.to("cpu")
+
+train_pair = PairDataset(train_data, train_data, sample=True, remove_random=True)
+test_pair = PairDataset(test_data, test_data, sample=True, remove_random=True)
+
 # Plot the correlation between the real distance and the predicted distance
-fig_train, _, _ = plot_correlation_prediction(model, train_data, "train")
-fig_test, _, _ = plot_correlation_prediction(model, test_data, "test")
+fig_train, _, _ = plot_correlation_prediction(model, train_pair, "train")
+fig_test, _, _ = plot_correlation_prediction(model, test_pair, "test")
 
 fig_train.savefig(os.path.join("models", name, "correlation_train.png"))
 fig_test.savefig(os.path.join("models", name, "correlation_test.png"))

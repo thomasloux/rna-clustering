@@ -81,20 +81,19 @@ def base_pair_distance_renorm(structure_1: Tensor, structure_2: Tensor,
         return distance
 
 # Make the graph of real distance vs predicted distance
-def plot_correlation_prediction(model: GAE, dataset: Dataset, title: str):
+def plot_correlation_prediction(model: GAE, dataset: PairDataset, title: str):
     """
     Plot the correlation between the real distance and the predicted distance.
 
-    :param dataset: dataset to use
+    :param dataset: dataset to use (Must provide PairDataset)
     :param title: title of the plot (train or test)
     """
     real_distances = []
     predicted_distances = []
 
     # Prepare the data loader
-    pair_dataset = PairDataset(dataset, dataset, sample=True)
     loader = DataLoader(
-        pair_dataset,
+        dataset,
         batch_size=16,
         shuffle=False,
         follow_batch=["x_1", "x_2"],
