@@ -36,6 +36,7 @@ class One_RNA_Dataset(Dataset):
             This folder is split into raw_dir (downloaded dataset) and processed_dir (processed dataset).
         :param n: number of suboptimal structures to generate
         """
+        self.root = root
         super(One_RNA_Dataset, self).__init__(root, transform, pre_transform, pre_filter)
 
     @property
@@ -90,7 +91,7 @@ class One_RNA_Dataset(Dataset):
             ]
         )
          
-        data = Data(x=x, edge_index=edge_pairs, edge_attr=edge_attributes, num_nodes=len(sequence), edge_attr=edge_attributes)
+        data = Data(x=x, edge_index=edge_pairs, edge_attr=edge_attributes, num_nodes=len(sequence))
 
         return data
 
@@ -118,7 +119,7 @@ class One_RNA_Dataset(Dataset):
             "-i", input_file,
             "--sorted",
             "--nonRedundant",
-            "-T=80"], capture_output=True)
+            "-T", str(80)], capture_output=True)
 
         ## Use all the suboptimal structures with a max energy from optimal structure
         # command = subprocess.run["RNAsubopt", "-e", str(n), "-i", input_file]
@@ -138,12 +139,17 @@ class One_RNA_Dataset(Dataset):
         # Clean structures
         structures = [x.split() for x in structures]
         structures = [x for x in structures if x] # Remove empty lines
-        structures = structure[1:]
 
-        df = pd.DataFrame(structures, columns=['structure'])
+        # Sort structures by probability (most probable first)
+        df = pd.DataFrame(structures, columns=['structure', 'energy', 'probability'])
+        df.sort_values(by=['probability'], inplace=True)
+
+        # Save the dataframe
+        df.to_csv(osp.join(self.root, 'structures.csv'))
+
+        structures = df['structure'].values
 
         data_list = [self.structure_to_data(structure, sequence) for structure in structures]
-        print(f"Number of structures : {len(data_list)}")
 
         if self.pre_filter is not None:
             data_list = [d for d in data_list if self.pre_filter(d)]
