@@ -1,6 +1,17 @@
 # rna-clustering
 Using GNN to cluster non coding RNA
 
+## Install Vienna RNA
+Get the latest version of ViennaRNA from https://www.tbi.univie.ac.at/RNA/#download
+For the current version
+wget https://www.tbi.univie.ac.at/RNA/download/sourcecode/2_6_x/ViennaRNA-2.6.4.tar.gz
+tar -xzf ViennaRNA-2.6.4.tar.gz
+cd ViennaRNA-2.6.4
+./configure
+make
+make check
+make install
+
 ## Run training
 While being in ./rna-clustering
 python gae/train.py --epoch 30 --alpha 0.1 --hidden-size 32 --name test_eval --device cuda --distance_loss_on
