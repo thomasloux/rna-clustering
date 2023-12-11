@@ -114,7 +114,7 @@ class One_RNA_Dataset(Dataset):
         ## Use a sample of the suboptimal structures
         command = subprocess.run([
             "RNAsubopt",
-            "--stochBT_en=" + str(n),
+            "--stochBT_en", str(n),
             "-i", input_file,
             "--sorted",
             "--nonRedundant",
@@ -134,6 +134,11 @@ class One_RNA_Dataset(Dataset):
             sequence = f.readline().strip()
 
         structures = self.generate_suboptimal_structures(self.raw_paths[0], n=self.n)
+
+        # Clean structures
+        structures = [x.split() for x in structures]
+        structures = [x for x in structures if x] # Remove empty lines
+        structures = structure[1:]
 
         df = pd.DataFrame(structures, columns=['structure'])
 
