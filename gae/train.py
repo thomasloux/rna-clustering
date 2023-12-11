@@ -44,11 +44,11 @@ parser.add_argument("--distance",
                     type=str,
                     default="euclidean",
                     help="Distance to use for training")
-parser.add_argument("--distance_loss",
+parser.add_argument("--distance-loss",
                     type=str,
                     default="L2",
                     help="Loss to compare distance and predicted distance")
-parser.add_argument("--distance_loss_only",
+parser.add_argument("--distance-loss-only",
                     type=bool,
                     default=False,
                     help="Only use distance loss for training")
@@ -56,6 +56,10 @@ parser.add_argument("--layer",
                     type=str,
                     default="GCNConv",
                     help="Type of Message Passing layer to use")
+parser.add_argument("--root-dataset",
+                    type=str,
+                    default="data/test",
+                    help="Root folder of the dataset")
 
 #########
 
@@ -69,6 +73,7 @@ distance = args.distance
 distance_loss = args.distance_loss
 distance_loss_only = args.distance_loss_only
 layer = args.layer
+root = args.root_dataset
 
 # Check if model already exists
 if os.path.exists(os.path.join("models", name)) and not os.path.isdir(os.path.join("models", name)):
@@ -87,6 +92,7 @@ with open(os.path.join("models", name, "parameters.txt"), "w") as f:
     f.write(f"Distance loss: {distance_loss}\n")
     f.write(f"Distance loss only: {distance_loss_only}\n")
     f.write(f"Layer: {layer}\n")
+    f.write(f"Root dataset: {root}\n")
 
 print(f"Training : alpha: {alpha}, size: {hidden_size}")
 try:
@@ -97,7 +103,7 @@ except Exception as e:
 model = get_vanilla_model(hidden_channels=hidden_size, layer=layer)
 
 # Load data
-data = One_RNA_Dataset(root="data/test")
+data = One_RNA_Dataset(root=root)
 train_data, test_data = random_split(data, [0.8, 0.2])
 
 try:
