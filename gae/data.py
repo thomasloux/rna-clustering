@@ -101,7 +101,13 @@ class One_RNA_Dataset(Dataset):
         # Return only the dot-bracket structure
         # --stochBT_en 
         # Return dot-bracket structure, energy and probability
+
+        ## Use a sample of the suboptimal structures
         command = subprocess.run(["RNAsubopt", "--stochBT=" + str(n), "-i", input_file], capture_output=True)
+
+        ## Use all the suboptimal structures with a max energy from optimal structure
+        # command = subprocess.run["RNAsubopt", "-e", str(n), "-i", input_file]
+
         output = command.stdout.decode('utf-8').split('\n')
         # Remove first line (sequence) and last line (empty)
         output = output[1:-1]
