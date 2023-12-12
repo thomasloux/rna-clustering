@@ -208,14 +208,14 @@ class PairDataset(torch.utils.data.Dataset):
             If True, the pairs will always be the same
             Use False for training and True for testing between multiple models
     """
-    def __init__(self, dataset_1, dataset_2, sample=False, remove_random=False):
+    def __init__(self, dataset_1, dataset_2, sample=False, remove_random=False, seed: int =42):
         if not sample and remove_random:
             raise ValueError("Cannot remove random if sample is False")
         self.dataset_1 = dataset_1
         self.dataset_2 = dataset_2
         self.sample = sample
         self.remove_random = remove_random
-        self.rng = np.random.default_rng(seed=42)
+        self.rng = np.random.default_rng(seed=seed)
         if self.remove_random:
             self.random_index = self.rng.integers(0, len(self.dataset_2), size=len(self.dataset_1))
 
