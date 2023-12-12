@@ -14,6 +14,7 @@ from torch_geometric.transforms import RandomLinkSplit
 from torch_geometric.data import Data, InMemoryDataset, Dataset
 from torch_geometric.loader import DataLoader
 from torch.nn import functional as F
+from torch_geometric.nn.pool import global_mean_pool
 from torch.utils.data import random_split
 from torch import Tensor
 import subprocess
@@ -37,10 +38,44 @@ class Encoder(torch.nn.Module):
     def forward(
         self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        x = self.conv1(x, edge_index, edge_attr).relu()
+        x = self.conv1(x, edge_index).relu()
         x = self.dropout(x)
-        x = self.conv2(x, edge_index, edge_attr).relu()
-        x = self.conv3(x, edge_index, edge_attr)
+        x = self.conv2(x, edge_index).relu()
+        x = self.conv3(x, edge_index)
+        return x
+
+class GraphEncoder(torch.nn.Module):
+    """
+    Provide graph embeddings
+    """
+    def __init__(self, in_channels: int, hidden_channels: int, layer: nn.MessagePassing, use_MLP=False) -> None:
+        super(Encoder, self).__init__()
+        self.hidden_channels = hidden_channels
+        self.conv1 = layer(in_channels, hidden_channels)
+        self.conv2 = layer(hidden_channels, hidden_channels)
+        self.conv3 = layer(hidden_channels, hidden_channels)
+
+        self.linear1 = torch.nn.Linear(hidden_channels, hidden_channels)
+        self.linear2 = torch.nn.Linear(hidden_channels, hidden_channels)
+        self.use_MLP = use_MLP
+
+        self.dropout = torch.nn.Dropout(p=0.1)
+
+    def forward(
+        self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        x = self.conv1(x, edge_index).relu()
+        x = self.dropout(x)
+        x = self.conv2(x, edge_index).relu()
+        x = self.conv3(x, edge_index)
+
+        # Graph embedding
+        x = global_mean_pool(x, batch)
+
+        if self.use_MLP:
+            x = self.linear1(x).relu()
+            x = self.linear2(x)
+
         return x
 
 
