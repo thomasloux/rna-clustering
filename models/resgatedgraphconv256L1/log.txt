@@ -1,0 +1,6 @@
+INFO:root:Total loss training 9.125892944335938
+INFO:root:Reconstruction loss training 0.0
+INFO:root:Distance loss training 9.125892944335938
+INFO:root:Total loss test 10.400777587890625
+INFO:root:Reconstruction loss test 0.0
+INFO:root:Distance loss test 10.400777587890625
