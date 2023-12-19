@@ -1,0 +1,8 @@
+Epoch: 30
+Alpha: 1.0
+Hidden size: 256
+Device: cuda
+Distance: euclidean
+Distance loss: L1
+Distance loss only: True
+Layer: GCNConv
