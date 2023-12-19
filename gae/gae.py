@@ -121,7 +121,7 @@ def get_couple_trained_model(
     # Check arguments
     if distance_from_embedding not in ["euclidean", "scalar_product"]:
         raise ValueError("distance_from_embedding must be either euclidean or scalar_product")
-    if distance_loss not in ["L2", "L1"]:
+    if distance_loss not in ["L2", "L1", "relative"]:
         raise ValueError("distance_loss must be either L2 or L1")
 
     # Check if model already exists
@@ -205,6 +205,8 @@ def get_couple_trained_model(
 
         if distance_loss == "L1":
             distance_loss_value = torch.abs(distance_predicted - distances)
+        elif distance_loss == "relative":
+            distance_loss_value = torch.abs(distance_predicted - distances) / distances
         else:
             distance_loss_value = (distance_predicted - distances)**2
 
